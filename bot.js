@@ -15,17 +15,11 @@ puppeteer.use(AdblockerPlugin({
 
 // Configuration
 const config = {
-  loginUrl: 'https://gpanel.eternalzero.cloud/auth/login',
+  baseUrl: 'https://gpanel.eternalzero.cloud',
   serverUrl: `https://gpanel.eternalzero.cloud/server/${process.env.SERVER_ID || '2005f497'}`,
-  credentials: {
-    // Use environment variables if available (for GitHub Actions), otherwise use hardcoded values
-    username: process.env.ETERNAL_USERNAME || 'jaydenkfox+eternalzero@gmail.com',
-    password: process.env.ETERNAL_PASSWORD || '25-WUQhTWFm-waU'
-  },
+  // Session cookie to use instead of logging in
+  sessionCookie: process.env.PTERODACTYL_SESSION || 'eyJpdiI6IjdMNXloQnZBcjZtZkU0VnB3bGNmNnc9PSIsInZhbHVlIjoiWjhZNFBwMWNlOThuMjFKaDF1ZjJTbWl2QWdOWFNDbitDcTRORzVjSVZZeTU5bkJUU3g2NEJKUHRkZFcvQ1NXaldRZERFamtQZmc1bisyQ01DM1Bia2pKSVcraVB5SWhrU1BkbTRadWtyMkdnQWNEb0FsMlZlY1crS2FrNExJakIiLCJtYWMiOiI3MDRjNzAxZTBkOGZhZmIzZTczODUxZTc1ZTk2Zjc3M2VjYWUwN2VhNDAwZTViNDIxMGFhMTI0MDg2NDRjZjBiIiwidGFnIjoiIn0%3D',
   selectors: {
-    usernameInput: 'input[name="username"]',
-    passwordInput: 'input[name="password"]',
-    loginButton: 'button[type="submit"]',
     renewButton: 'button:has-text("ADD 4H")'  // Will use page.evaluate for text-based selection
   },
   // Check if running in CI/CD environment
@@ -48,7 +42,7 @@ async function autoRenewServer() {
     
     // Launch browser with enhanced options
     browser = await puppeteer.launch({
-      headless: config.isCI ? 'new' : true, // Use 'new' headless mode in CI, visible browser locally
+      headless: config.isCI ? 'new' : false, // Use 'new' headless mode in CI, visible browser locally
       defaultViewport: null,
       args: [
         '--no-sandbox',
@@ -96,49 +90,20 @@ async function autoRenewServer() {
       }
     });
     
-    // Step 1: Navigate to login page
-    console.log('📍 Navigating to login page...');
-    console.log(`🔗 URL: ${config.loginUrl}`);
-    await page.goto(config.loginUrl, {
-      waitUntil: 'networkidle2',
-      timeout: 30000
+    // Step 1: Set the session cookie to bypass login
+    console.log('🍪 Setting Pterodactyl session cookie...');
+    await page.setCookie({
+      name: 'pterodactyl_session',
+      value: decodeURIComponent(config.sessionCookie), // Decode the URL-encoded cookie value
+      domain: 'gpanel.eternalzero.cloud',
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax'
     });
+    console.log('✅ Session cookie set successfully');
     
-    // Wait for page to fully load
-    await delay(2000);
-    
-    // Step 2: Fill in username
-    console.log('✏️ Entering username...');
-    await page.waitForSelector(config.selectors.usernameInput, { timeout: 10000 });
-    await page.click(config.selectors.usernameInput);
-    await page.type(config.selectors.usernameInput, config.credentials.username, { delay: 100 });
-    
-    // Step 3: Fill in password
-    console.log('🔑 Entering password...');
-    await page.waitForSelector(config.selectors.passwordInput, { timeout: 10000 });
-    await page.click(config.selectors.passwordInput);
-    await page.type(config.selectors.passwordInput, config.credentials.password, { delay: 100 });
-    
-    // Small delay before clicking login
-    await delay(1000);
-    
-    // Step 4: Click login button
-    console.log('🔐 Clicking login button...');
-    await page.click(config.selectors.loginButton);
-    
-    // Wait for navigation after login
-    console.log('⏳ Waiting for login to complete...');
-    await page.waitForNavigation({ 
-      waitUntil: 'networkidle2',
-      timeout: 30000 
-    }).catch(() => {
-      console.log('Navigation wait timed out, checking if already logged in...');
-    });
-    
-    // Additional wait to ensure login is processed
-    await delay(3000);
-    
-    // Step 5: Navigate to server page
+    // Step 2: Navigate directly to server page
     console.log('📍 Navigating to server page...');
     console.log(`🔗 Server URL: ${config.serverUrl}`);
     await page.goto(config.serverUrl, {
@@ -149,7 +114,7 @@ async function autoRenewServer() {
     // Wait for page to load completely
     await delay(3000);
     
-    // Step 6: Find and click the "ADD 4H" button
+    // Step 3: Find and click the "ADD 4H" button
     console.log('🔍 Looking for renewal button...');
     
     // Try multiple methods to find and click the button
@@ -245,7 +210,7 @@ if (require.main === module) {
   
   // Log configuration (without sensitive data)
   console.log('📋 Configuration:');
-  console.log(`  • Username: ${config.credentials.username.substring(0, 5)}...`);
+  console.log(`  • Authentication: Using Pterodactyl session cookie`);
   console.log(`  • Server URL: ${config.serverUrl}`);
   console.log(`  • Environment: ${config.isCI ? 'CI/CD' : 'Local'}`);
   console.log('━'.repeat(50));
