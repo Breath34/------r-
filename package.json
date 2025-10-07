@@ -1,0 +1,19 @@
+{
+  "name": "server-auto-renew-bot",
+  "version": "1.0.0",
+  "description": "Automated bot for server renewal on EternalZero panel",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["puppeteer", "automation", "bot"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "puppeteer": "^23.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-adblocker": "^2.13.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}
