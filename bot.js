@@ -42,7 +42,7 @@ async function autoRenewServer() {
     
     // Launch browser with enhanced options
     browser = await puppeteer.launch({
-      headless: config.isCI ? 'new' : false, // Use 'new' headless mode in CI, visible browser locally
+      headless: config.isCI ? 'new' : true, // Use 'new' headless mode in CI, visible browser locally
       defaultViewport: null,
       args: [
         '--no-sandbox',
