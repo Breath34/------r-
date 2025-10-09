@@ -1,4 +1,4 @@
-name: EternalZero Server Auto-Renewal
+name: EternalZero Server Auto-Renewal 2
 
 on:
   schedule:
