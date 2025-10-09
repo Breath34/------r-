@@ -16,9 +16,9 @@ puppeteer.use(AdblockerPlugin({
 // Configuration
 const config = {
   baseUrl: 'https://gpanel.eternalzero.cloud',
-  serverUrl: `https://gpanel.eternalzero.cloud/server/${process.env.SERVER_ID || '2005f497'}`,
+  serverUrl: `https://gpanel.eternalzero.cloud/server/${process.env.SERVER_ID || 'aa45d7aa'}`,
   // Session cookie to use instead of logging in
-  sessionCookie: process.env.PTERODACTYL_SESSION || 'eyJpdiI6IjdMNXloQnZBcjZtZkU0VnB3bGNmNnc9PSIsInZhbHVlIjoiWjhZNFBwMWNlOThuMjFKaDF1ZjJTbWl2QWdOWFNDbitDcTRORzVjSVZZeTU5bkJUU3g2NEJKUHRkZFcvQ1NXaldRZERFamtQZmc1bisyQ01DM1Bia2pKSVcraVB5SWhrU1BkbTRadWtyMkdnQWNEb0FsMlZlY1crS2FrNExJakIiLCJtYWMiOiI3MDRjNzAxZTBkOGZhZmIzZTczODUxZTc1ZTk2Zjc3M2VjYWUwN2VhNDAwZTViNDIxMGFhMTI0MDg2NDRjZjBiIiwidGFnIjoiIn0%3D',
+  sessionCookie: process.env.PTERODACTYL_SESSION || 'eyJpdiI6IjVjV1Q4cXVvejgvUmlScmVoVXN1NHc9PSIsInZhbHVlIjoiTzFUVTRaOWVkZVFadU51ZDRGK1MwajJlQzZlZFcrSGs5U1RZdlN6VTd4RUJhbU9MTWlTVzAyMFBGMnRQbC9IWUxNaVpCd3ByREtuME1neWw1MkFJNFViSHhFcmVkbFRaRGxhREtZcU1TTGdOeEQ0b0VCRWFrRjFOb2d4UGREd1kiLCJtYWMiOiJjM2EzMzYzMDY5NTZmZGU0MmM2OWQ0MGY5ZGVmN2UyMDI0Mjc3MGNmMDA5Y2E3NDIxYjBlZGMwNjU2OGRmMzRjIiwidGFnIjoiIn0%3D',
   selectors: {
     renewButton: 'button:has-text("ADD 4H")'  // Will use page.evaluate for text-based selection
   },
@@ -248,3 +248,4 @@ module.exports = { autoRenewServer };
 // console.log('📅 Scheduler started. Bot will run every 3 hours.');
 // console.log('🏃 Running initial check...');
 // autoRenewServer().catch(console.error);
+
