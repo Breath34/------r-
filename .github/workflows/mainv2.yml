@@ -1,0 +1,54 @@
+name: EternalZero Server Auto-Renewal
+
+on:
+  schedule:
+    # Run 6 times a day with 3 hours between each run
+    - cron: '0 0,3,6,9,12,15 * * *'
+  workflow_dispatch:
+
+jobs:
+  renew-server:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code from another branch
+      uses: actions/checkout@v4
+      with:
+        ref: v2
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run server renewal bot
+      env:
+        ETERNAL_USERNAME: ${{ secrets.ETERNAL_USERNAME }}
+        ETERNAL_PASSWORD: ${{ secrets.ETERNAL_PASSWORD }}
+        SERVER_ID: ${{ secrets.SERVER_ID }}
+      run: node bot.js
+      timeout-minutes: 5
+
+    - name: Upload screenshots (if any)
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: renewal-screenshots-${{ github.run_number }}
+        path: |
+          *.png
+          *.jpg
+        retention-days: 7
+        if-no-files-found: ignore
+
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: renewal-logs-${{ github.run_number }}
+        path: logs/
+        retention-days: 7
+        if-no-files-found: ignore
