@@ -2,8 +2,7 @@ name: EternalZero Server Auto-Renewal
 
 on:
   schedule:
-    # Run every 2 hours to ensure we catch the cooldown window
-    # Times are in UTC
+    # Run every 2 hours
     - cron: '0 */2 * * *'
   
   # Allow manual trigger from GitHub Actions tab
@@ -21,20 +20,17 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-        cache: 'pip'
+        # Cache line removed to prevent error
     
     - name: Install dependencies
       run: pip install aiohttp
 
     - name: Run server renewal bot
       env:
-        # We pass the secret cookie to the python script here
         ETERNAL_COOKIE: ${{ secrets.ETERNAL_COOKIE }}
       run: python renew.py
       timeout-minutes: 5
     
-    # Optional: Upload logs if you decide to write to a file in the script
-    # Currently set to ignore if no files exist, so it won't break anything.
     - name: Upload logs
       if: always()
       uses: actions/upload-artifact@v4
