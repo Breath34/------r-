@@ -57,7 +57,6 @@ async def get_csrf_token(session):
                     print("[!] Could not find CSRF token in HTML. Cloudflare might be blocking the script.")
             elif resp.status == 401 or resp.status == 302:
                 print("[!] YOUR COOKIE IS DEAD. Please login and grab a new pterodactyl_session cookie.")
-                # We exit with error 1 so GitHub Actions marks the run as FAILED
                 sys.exit(1)
             else:
                 print(f"[!] Unexpected status fetching token: {resp.status}")
@@ -117,4 +116,39 @@ async def fire_shot(session, url, headers):
         async with session.post(url, json={}, headers=headers, params={'z': random.random()}) as resp:
             # We don't read the body to save time, just check the status code
             await resp.read()
-            return resp.status in [2
+            # This is the line that was breaking before
+            return resp.status in [200, 201]
+    except:
+        return False
+
+# === MAIN ORCHESTRATOR ===
+async def main():
+    # TCPConnector limit=0 disables the connection pool limit
+    connector = aiohttp.TCPConnector(limit=0, force_close=True)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        
+        # 1. Get Token
+        token = await get_csrf_token(session)
+        if not token:
+            print("[!] Aborting: No Token.")
+            sys.exit(1)
+
+        # 2. Get List
+        servers = await get_server_list(session, token)
+        if not servers:
+            print("[!] Aborting: No Servers found.")
+            return
+
+        # 3. Iterate and Destroy
+        print("-" * 40)
+        for server in servers:
+            await storm_server(session, server, token)
+            # Small delay between servers to prevent total account IP ban
+            await asyncio.sleep(1) 
+        print("-" * 40)
+        print("[*] FLEET RENEWAL COMPLETE.")
+
+if __name__ == "__main__":
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    asyncio.run(main())
