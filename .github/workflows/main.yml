@@ -2,9 +2,9 @@ name: EternalZero Server Auto-Renewal
 
 on:
   schedule:
-    # Run 6 times a day with 3 hours between each run
+    # Run every 2 hours to ensure we catch the cooldown window
     # Times are in UTC
-    - cron: '0 0,3,6,9,12,15 * * *'
+    - cron: '0 */2 * * *'
   
   # Allow manual trigger from GitHub Actions tab
   workflow_dispatch:
@@ -17,34 +17,24 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
+    - name: Setup Python
+      uses: actions/setup-python@v5
       with:
-        node-version: '20'
-        cache: 'npm'
+        python-version: '3.11'
+        cache: 'pip'
     
     - name: Install dependencies
-      run: npm ci
-    
+      run: pip install aiohttp
+
     - name: Run server renewal bot
       env:
-        ETERNAL_USERNAME: ${{ secrets.ETERNAL_USERNAME }}
-        ETERNAL_PASSWORD: ${{ secrets.ETERNAL_PASSWORD }}
-        SERVER_ID: ${{ secrets.SERVER_ID }}
-      run: node bot.js
+        # We pass the secret cookie to the python script here
+        ETERNAL_COOKIE: ${{ secrets.ETERNAL_COOKIE }}
+      run: python renew.py
       timeout-minutes: 5
     
-    - name: Upload screenshots (if any)
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: renewal-screenshots-${{ github.run_number }}
-        path: |
-          *.png
-          *.jpg
-        retention-days: 7
-        if-no-files-found: ignore
-    
+    # Optional: Upload logs if you decide to write to a file in the script
+    # Currently set to ignore if no files exist, so it won't break anything.
     - name: Upload logs
       if: always()
       uses: actions/upload-artifact@v4
