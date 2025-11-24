@@ -5,6 +5,7 @@ import random
 import os
 import json
 from urllib.parse import unquote
+from http.cookies import SimpleCookie
 
 # === CONFIGURATION ===
 BASE_URL = "https://gpanel.eternalzero.cloud"
@@ -18,86 +19,96 @@ if not RAW_COOKIE:
 BURST_SIZE = 60
 TIMEOUT = 15
 
-# === COOKIE SETUP ===
-# We initialize the jar with your session cookie.
-# This mimics the browser already having the session logged in.
-initial_cookies = {}
-if "pterodactyl_session" not in RAW_COOKIE:
-    initial_cookies['pterodactyl_session'] = RAW_COOKIE
-else:
-    # Handle case where user pasted full string "key=value; key2=value2"
-    for item in RAW_COOKIE.split(';'):
-        if '=' in item:
-            k, v = item.strip().split('=', 1)
-            initial_cookies[k.strip()] = v.strip()
+# === GLOBAL STATE ===
+# We store cookies here manually to ensure they don't get messed up
+state = {
+    'pterodactyl_session': '',
+    'XSRF-TOKEN': ''
+}
 
-# === HEADER FACTORY ===
-def get_headers(session, referer=None):
-    # Standard headers from your Command 2 output
+# Parse the user's input cookie
+if "pterodactyl_session" in RAW_COOKIE:
+    # User pasted full string
+    temp = SimpleCookie()
+    temp.load(RAW_COOKIE)
+    if 'pterodactyl_session' in temp:
+        state['pterodactyl_session'] = temp['pterodactyl_session'].value
+else:
+    # User pasted just the value
+    state['pterodactyl_session'] = RAW_COOKIE.strip()
+
+# === HELPERS ===
+def build_cookie_header():
+    # Construct the string manually: "key=value; key2=value2"
+    c = f"pterodactyl_session={state['pterodactyl_session']}"
+    if state['XSRF-TOKEN']:
+        c += f"; XSRF-TOKEN={state['XSRF-TOKEN']}"
+    return c
+
+def get_headers(referer=None):
     h = {
         'authority': 'gpanel.eternalzero.cloud',
         'accept': 'application/json',
         'content-type': 'application/json',
         'origin': BASE_URL,
         'x-requested-with': 'XMLHttpRequest',
+        'cookie': build_cookie_header(),
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     
-    # CRITICAL: MIMIC BROWSER LOGIC
-    # 1. Find the XSRF-TOKEN cookie in the jar
-    # 2. Decode it (remove %3D etc)
-    # 3. Set it as 'X-XSRF-TOKEN' header
-    xsrf_val = None
-    for cookie in session.cookie_jar:
-        if cookie.key == 'XSRF-TOKEN':
-            xsrf_val = unquote(cookie.value)
-            break
-            
-    if xsrf_val:
-        h['X-XSRF-TOKEN'] = xsrf_val
-        # We explicitly do NOT set X-CSRF-TOKEN because your logs showed it as "MISSING"
+    # Add X-XSRF-TOKEN if we have it (Decoded)
+    if state['XSRF-TOKEN']:
+        h['X-XSRF-TOKEN'] = unquote(state['XSRF-TOKEN'])
     
     if referer:
         h['referer'] = referer
+    else:
+        # Default referer is usually required for CSRF checks
+        h['referer'] = f"{BASE_URL}/"
         
     return h
 
 # === STEP 1: PRIME COOKIES ===
 async def prime_cookies(session):
-    print("[*] Priming cookies (visiting dashboard)...")
+    print("[*] Priming cookies (hitting dashboard)...")
     try:
-        # We visit the dashboard just to force the server to send us a fresh XSRF-TOKEN cookie
+        # Headers specifically for HTML
         headers = {
             'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'cookie': build_cookie_header()
         }
+        
         async with session.get(BASE_URL, headers=headers) as resp:
-            await resp.text() # Consume body
+            await resp.text() # Read body to ensure we get cookies
             
-            # Check if we got the cookie
-            cookies = [c.key for c in session.cookie_jar]
-            if 'XSRF-TOKEN' in cookies:
-                print("[+] Cookie Jar Primed: XSRF-TOKEN acquired.")
+            # Manually extract Set-Cookie headers from the response
+            # because aiohttp merges them sometimes.
+            for cookie in session.cookie_jar:
+                if cookie.key == 'XSRF-TOKEN':
+                    state['XSRF-TOKEN'] = cookie.value
+                if cookie.key == 'pterodactyl_session':
+                    print("[!] Server rotated session cookie. Updating...")
+                    state['pterodactyl_session'] = cookie.value
+
+            if state['XSRF-TOKEN']:
+                print(f"[+] XSRF-TOKEN Acquired: {state['XSRF-TOKEN'][:15]}...")
                 return True
             else:
-                print("[!] Failed to get XSRF-TOKEN cookie. Session might be invalid.")
+                print("[!] Failed to get XSRF-TOKEN. Check your ETERNAL_COOKIE.")
                 return False
+
     except Exception as e:
-        print(f"[!] Priming Error: {e}")
+        print(f"[!] Prime Error: {e}")
         return False
 
 # === STEP 2: GET SERVER LIST ===
 async def get_server_list(session):
     print("[*] Fetching server list...")
     try:
-        # Pass session so get_headers can extract the token
-        headers = get_headers(session)
+        # Explicitly passing the referer here!
+        headers = get_headers(referer=f"{BASE_URL}/")
         
-        # DEBUG: Print headers to verify they match your browser logs
-        if 'X-XSRF-TOKEN' not in headers:
-            print("[!] FATAL: X-XSRF-TOKEN header missing. Logic failed.")
-            return []
-
         async with session.get(f"{BASE_URL}/api/client", headers=headers) as resp:
             if resp.status == 200:
                 data = await resp.json()
@@ -122,7 +133,7 @@ async def storm_server(session, server):
     target_url = f"{BASE_URL}/api/client/freeservers/{server['uuid']}/renew"
     print(f"\n[>>>] TARGET: {server['name']} ({server['short']})")
     
-    headers = get_headers(session, referer=f"{BASE_URL}/server/{server['short']}")
+    headers = get_headers(referer=f"{BASE_URL}/server/{server['short']}")
     
     tasks = []
     for i in range(BURST_SIZE):
@@ -139,6 +150,7 @@ async def storm_server(session, server):
 
 async def fire_shot(session, url, headers):
     try:
+        # We manually constructed headers, so we don't need cookie_jar logic here
         async with session.post(url, json={}, headers=headers, params={'z': random.random()}) as resp:
             await resp.read()
             return resp.status in [200, 201]
@@ -148,7 +160,7 @@ async def fire_shot(session, url, headers):
 # === MAIN ===
 async def main():
     connector = aiohttp.TCPConnector(limit=0, force_close=True)
-    async with aiohttp.ClientSession(cookies=initial_cookies, connector=connector) as session:
+    async with aiohttp.ClientSession(connector=connector) as session:
         
         if await prime_cookies(session):
             servers = await get_server_list(session)
