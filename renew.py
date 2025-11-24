@@ -8,25 +8,29 @@ import json
 
 # === CONFIGURATION ===
 BASE_URL = "https://gpanel.eternalzero.cloud"
-
-# Read the cookie from GitHub Secrets
 RAW_COOKIE = os.environ.get("ETERNAL_COOKIE")
 
 if not RAW_COOKIE:
-    print("[!] FATAL ERROR: ETERNAL_COOKIE environment variable is not set.")
+    print("[!] FATAL: ETERNAL_COOKIE secret is missing.")
     sys.exit(1)
 
-# === SMART COOKIE REPAIR ===
-# If the user pasted just the value "eyJ...", we prepend the key name.
-if "pterodactyl_session" not in RAW_COOKIE:
-    print("[*] Detected raw cookie value. Prepending 'pterodactyl_session='...")
-    COOKIE_STRING = f"pterodactyl_session={RAW_COOKIE}"
-else:
-    COOKIE_STRING = RAW_COOKIE
-
-# Attack Settings
+# === ATTACK SETTINGS ===
 BURST_SIZE = 60
 TIMEOUT = 15
+
+# === COOKIE SETUP ===
+# We construct a dictionary for the session to manage automatically
+initial_cookies = {}
+
+# Logic: If user pasted just the value "eyJ...", treat it as the session.
+if "pterodactyl_session" not in RAW_COOKIE:
+    initial_cookies['pterodactyl_session'] = RAW_COOKIE
+else:
+    # Basic parse if they pasted "key=value; key2=value2"
+    for item in RAW_COOKIE.split(';'):
+        if '=' in item:
+            k, v = item.strip().split('=', 1)
+            initial_cookies[k] = v
 
 # === HEADER FACTORY ===
 def get_headers(csrf_token=None, referer=None):
@@ -36,7 +40,6 @@ def get_headers(csrf_token=None, referer=None):
         'content-type': 'application/json',
         'origin': BASE_URL,
         'x-requested-with': 'XMLHttpRequest',
-        'cookie': COOKIE_STRING, # Force the cookie header
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     if csrf_token:
@@ -45,61 +48,67 @@ def get_headers(csrf_token=None, referer=None):
         h['referer'] = referer
     return h
 
-# === STEP 1: LOGIN & GET CSRF ===
-async def get_csrf_token(session):
-    print("[*] Connecting to Dashboard...")
+# === STEP 1: AUTHENTICATE & HEAL COOKIES ===
+async def authenticate(session):
+    print("[*] Connecting to Dashboard to heal cookies...")
     try:
-        # Request HTML to find the token
-        headers = get_headers()
-        headers['accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        # We perform a GET request. The session will automatically
+        # absorb the 'XSRF-TOKEN' cookie sent by the server.
+        headers = {
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
         
         async with session.get(BASE_URL, headers=headers) as resp:
             text = await resp.text()
 
-            # CHECK: Are we actually logged in?
-            if "login" in str(resp.url) or "Sign in to" in text:
-                print("\n[!] AUTHENTICATION FAILED [!]")
-                print("    The server redirected us to the Login Page.")
-                print("    Your ETERNAL_COOKIE is invalid. Please get a fresh one.")
+            # CHECK: Did we get bounced to login?
+            if "login" in str(resp.url) or "Sign in" in text:
+                print("\n[!] AUTH FAILED: Redirected to Login.")
+                print("    Your 'pterodactyl_session' cookie is invalid/expired.")
                 sys.exit(1)
 
             if resp.status == 200:
+                # Grab the Header Token
                 match = re.search(r'<meta name="csrf-token" content="([^"]+)">', text)
                 if match:
                     token = match.group(1)
-                    print(f"[+] Authenticated. Token: {token[:15]}...")
+                    print(f"[+] CSRF Token: {token[:10]}...")
+                    
+                    # DEBUG: Print cookies to ensure we have the pair
+                    # We expect pterodactyl_session AND XSRF-TOKEN
+                    print(f"[+] Active Cookies: {list(session.cookie_jar.filter_cookies(BASE_URL).keys())}")
                     return token
                 else:
-                    print("[!] Could not find CSRF token in HTML.")
+                    print("[!] No CSRF token in HTML.")
             else:
-                print(f"[!] Dashboard load failed: {resp.status}")
+                print(f"[!] Dashboard Status: {resp.status}")
     except Exception as e:
-        print(f"[!] Connection error: {e}")
+        print(f"[!] Auth Error: {e}")
     return None
 
-# === STEP 2: GET SERVERS ===
+# === STEP 2: GET SERVER LIST ===
 async def get_server_list(session, csrf_token):
-    print("[*] Fetching server list...")
-    servers = []
+    print("[*] Fetching server list via API...")
     try:
-        # We hit /api/client to get the JSON list you provided
+        # Now we call the API. The session automatically sends the new XSRF-TOKEN cookie.
         async with session.get(f"{BASE_URL}/api/client", headers=get_headers(csrf_token)) as resp:
             if resp.status == 200:
                 data = await resp.json()
+                servers = []
                 for item in data['data']:
                     attr = item['attributes']
                     servers.append({
                         'name': attr['name'],
-                        'uuid': attr['uuid'],      # Long UUID
-                        'short': attr['identifier'] # Short UUID
+                        'uuid': attr['uuid'],
+                        'short': attr['identifier']
                     })
                 print(f"[+] Found {len(servers)} servers.")
                 return servers
             else:
-                print(f"[!] API Error: {resp.status}")
-                print(f"    Response: {await resp.text()}")
+                print(f"[!] API Error {resp.status}: {await resp.text()}")
     except Exception as e:
-        print(f"[!] Error fetching list: {e}")
+        print(f"[!] List Error: {e}")
     return []
 
 # === STEP 3: THE STORM ===
@@ -120,7 +129,7 @@ async def storm_server(session, server, csrf_token):
     if hits > 0:
         print(f"[$$$] SUCCESS! Added +{hits * 4} Hours")
     else:
-        print(f"[---] Failed (Cooldown active or blocked)")
+        print(f"[---] No Hits (Cooldown or Blocked)")
 
 async def fire_shot(session, url, headers):
     try:
@@ -132,11 +141,11 @@ async def fire_shot(session, url, headers):
 
 # === MAIN ===
 async def main():
+    # Setup the session with the user's initial cookie
     connector = aiohttp.TCPConnector(limit=0, force_close=True)
-    # We pass an empty session because we are forcing headers manually
-    async with aiohttp.ClientSession(connector=connector) as session:
+    async with aiohttp.ClientSession(cookies=initial_cookies, connector=connector) as session:
         
-        token = await get_csrf_token(session)
+        token = await authenticate(session)
         if not token: return
 
         servers = await get_server_list(session, token)
@@ -147,7 +156,7 @@ async def main():
             await storm_server(session, server, token)
             await asyncio.sleep(1) 
         print("-" * 40)
-        print("[*] DONE.")
+        print("[*] FLEET RENEWAL COMPLETE.")
 
 if __name__ == "__main__":
     if sys.platform == 'win32':
