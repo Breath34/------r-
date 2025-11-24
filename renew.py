@@ -2,7 +2,6 @@ import aiohttp
 import asyncio
 import sys
 import random
-import re
 import os
 import json
 from urllib.parse import unquote
@@ -20,18 +19,21 @@ BURST_SIZE = 60
 TIMEOUT = 15
 
 # === COOKIE SETUP ===
+# We initialize the jar with your session cookie.
+# This mimics the browser already having the session logged in.
 initial_cookies = {}
 if "pterodactyl_session" not in RAW_COOKIE:
     initial_cookies['pterodactyl_session'] = RAW_COOKIE
 else:
+    # Handle case where user pasted full string "key=value; key2=value2"
     for item in RAW_COOKIE.split(';'):
         if '=' in item:
             k, v = item.strip().split('=', 1)
-            initial_cookies[k] = v
+            initial_cookies[k.strip()] = v.strip()
 
 # === HEADER FACTORY ===
 def get_headers(session, referer=None):
-    # Base Headers
+    # Standard headers from your Command 2 output
     h = {
         'authority': 'gpanel.eternalzero.cloud',
         'accept': 'application/json',
@@ -41,60 +43,62 @@ def get_headers(session, referer=None):
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     
-    # CRITICAL: Extract XSRF-TOKEN from cookies and add to header
-    # The API requires the header 'x-xsrf-token' to match the cookie 'XSRF-TOKEN'
-    xsrf_cookie = None
+    # CRITICAL: MIMIC BROWSER LOGIC
+    # 1. Find the XSRF-TOKEN cookie in the jar
+    # 2. Decode it (remove %3D etc)
+    # 3. Set it as 'X-XSRF-TOKEN' header
+    xsrf_val = None
     for cookie in session.cookie_jar:
         if cookie.key == 'XSRF-TOKEN':
-            # We must unquote it because cookies are often URL-encoded
-            xsrf_cookie = unquote(cookie.value)
+            xsrf_val = unquote(cookie.value)
             break
             
-    if xsrf_cookie:
-        h['x-xsrf-token'] = xsrf_cookie
+    if xsrf_val:
+        h['X-XSRF-TOKEN'] = xsrf_val
+        # We explicitly do NOT set X-CSRF-TOKEN because your logs showed it as "MISSING"
     
     if referer:
         h['referer'] = referer
         
     return h
 
-# === STEP 1: AUTHENTICATE & HEAL COOKIES ===
-async def authenticate(session):
-    print("[*] Connecting to Dashboard to heal cookies...")
+# === STEP 1: PRIME COOKIES ===
+async def prime_cookies(session):
+    print("[*] Priming cookies (visiting dashboard)...")
     try:
+        # We visit the dashboard just to force the server to send us a fresh XSRF-TOKEN cookie
         headers = {
             'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
-        
         async with session.get(BASE_URL, headers=headers) as resp:
-            text = await resp.text()
-
-            if "login" in str(resp.url) or "Sign in" in text:
-                print("\n[!] AUTH FAILED: Redirected to Login.")
-                sys.exit(1)
-
-            if resp.status == 200:
-                # Check if we got the cookie we need
-                cookies = [c.key for c in session.cookie_jar]
-                if 'XSRF-TOKEN' in cookies:
-                    print("[+] XSRF-TOKEN Cookie acquired.")
-                    return True
-                else:
-                    print("[!] Loaded dashboard but Server did not send XSRF-TOKEN cookie.")
-                    return False
+            await resp.text() # Consume body
+            
+            # Check if we got the cookie
+            cookies = [c.key for c in session.cookie_jar]
+            if 'XSRF-TOKEN' in cookies:
+                print("[+] Cookie Jar Primed: XSRF-TOKEN acquired.")
+                return True
             else:
-                print(f"[!] Dashboard Status: {resp.status}")
+                print("[!] Failed to get XSRF-TOKEN cookie. Session might be invalid.")
+                return False
     except Exception as e:
-        print(f"[!] Auth Error: {e}")
-    return False
+        print(f"[!] Priming Error: {e}")
+        return False
 
 # === STEP 2: GET SERVER LIST ===
 async def get_server_list(session):
-    print("[*] Fetching server list via API...")
+    print("[*] Fetching server list...")
     try:
         # Pass session so get_headers can extract the token
-        async with session.get(f"{BASE_URL}/api/client", headers=get_headers(session)) as resp:
+        headers = get_headers(session)
+        
+        # DEBUG: Print headers to verify they match your browser logs
+        if 'X-XSRF-TOKEN' not in headers:
+            print("[!] FATAL: X-XSRF-TOKEN header missing. Logic failed.")
+            return []
+
+        async with session.get(f"{BASE_URL}/api/client", headers=headers) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 servers = []
@@ -146,7 +150,7 @@ async def main():
     connector = aiohttp.TCPConnector(limit=0, force_close=True)
     async with aiohttp.ClientSession(cookies=initial_cookies, connector=connector) as session:
         
-        if await authenticate(session):
+        if await prime_cookies(session):
             servers = await get_server_list(session)
             if servers:
                 print("-" * 40)
